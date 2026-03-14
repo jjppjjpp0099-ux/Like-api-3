@@ -1,108 +1,78 @@
-https://like-api-5-bot.vercel.app/    iv = b'6oyZDr22E3ychjM%'
-    cipher = AES.new(key, AES.MODE_CBC, iv)
-    padded_message = pad(plaintext, AES.block_size)
-    encrypted_message = cipher.encrypt(padded_message)
-    return binascii.hexlify(encrypted_message).decode('utf-8')
+from flask import Flask, request, jsonify
+import requests
+import random
 
-def create_protobuf_message(user_id, region):
-    message = like_pb2.like()
-    message.uid = int(user_id)
-    message.region = region
-    return message.SerializeToString()
+app = Flask(__name__)
 
-def create_protobuf_for_profile_check(uid):
-    message = uid_generator_pb2.uid_generator()
-    message.krishna_ = int(uid)
-    message.teamXdarks = 1
-    return message.SerializeToString()
-
-def enc_profile_check_payload(uid):
-    protobuf_data = create_protobuf_for_profile_check(uid)
-    encrypted_uid = encrypt_message(protobuf_data)
-    return encrypted_uid
-
-async def send_single_like_request(encrypted_like_payload, token_dict, url):
-    edata = bytes.fromhex(encrypted_like_payload)
-    token_value = token_dict.get("token", "")
-    if not token_value:
-        print("Warning: send_single_like_request received an empty or invalid token_dict.")
-        return 999
-
-    headers = {
-        'User-Agent': "Dalvik/2.1.0 (Linux; U; Android 9; ASUS_Z01QD Build/PI)",
-        'Connection': "Keep-Alive",
-        'Accept-Encoding': "gzip",
-        'Authorization': f"Bearer {token_value}",
-        'Content-Type': "application/x-www-form-urlencoded",
-        'Expect': "100-continue",
-        'X-Unity-Version': "2018.4.11f1",
-        'X-GA': "v1 1",
-        'ReleaseVersion': "OB52"
+def get_flag(region):
+    flags = {
+        "IND": "🇮🇳"
     }
+    return flags.get(region.upper(),"🌍")
+
+@app.route("/like")
+def like():
+
+    uid = request.args.get("uid")
+    region = request.args.get("server_name","IND").upper()
+
+    if not uid:
+        return jsonify({"error":"UID missing"})
+
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, data=edata, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as response:
-                if response.status != 200:
-                    print(f"Like request failed for token {token_value[:10]}... with status: {response.status}")
-                return response.status
-    except asyncio.TimeoutError:
-        print(f"Like request timed out for token {token_value[:10]}...")
-        return 998
-    except Exception as e:
-        print(f"Exception in send_single_like_request for token {token_value[:10]}...: {e}")
-        return 997
 
-async def send_likes_with_token_batch(uid, server_region_for_like_proto, like_api_url, token_batch_to_use):
-    if not token_batch_to_use:
-        print("No tokens provided in the batch to send_likes_with_token_batch.")
-        return []
+        profile_url = f"https://freefireinfo.vercel.app/api/profile?uid={uid}&region={region}"
+        r = requests.get(profile_url,timeout=10)
+        data = r.json()
 
-    like_protobuf_payload = create_protobuf_message(uid, server_region_for_like_proto)
-    encrypted_like_payload = encrypt_message(like_protobuf_payload)
-    
-    tasks = []
-    for token_dict_for_request in token_batch_to_use:
-        tasks.append(send_single_like_request(encrypted_like_payload, token_dict_for_request, like_api_url))
-    
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-    
-    successful_sends = sum(1 for r in results if isinstance(r, int) and r == 200)
-    failed_sends = len(token_batch_to_use) - successful_sends
-    print(f"Attempted {len(token_batch_to_use)} like sends from batch. Successful: {successful_sends}, Failed/Error: {failed_sends}")
-    return results
+    except:
+        return jsonify({"error":"profile fetch failed"})
 
-def make_profile_check_request(encrypted_profile_payload, server_name, token_dict):
-    token_value = token_dict.get("token", "")
-    if not token_value:
-        print("Warning: make_profile_check_request received an empty token_dict.")
-        return None
+    if "AccountInfo" not in data:
+        return jsonify({"status":0})
 
-    if server_name == "IND":
-        url = "https://client.ind.freefiremobile.com/GetPlayerPersonalShow"
-    elif server_name in {"BR", "US", "SAC", "NA"}:
-        url = "https://client.us.freefiremobile.com/GetPlayerPersonalShow"
-    else:
-        url = "https://clientbp.ggblueshark.com/GetPlayerPersonalShow"
+    info = data["AccountInfo"]
 
-    edata = bytes.fromhex(encrypted_profile_payload)
-    headers = {
-        'User-Agent': "Dalvik/2.1.0 (Linux; U; Android 9; ASUS_Z01QD Build/PI)",
-        'Connection': "Keep-Alive",
-        'Accept-Encoding': "gzip",
-        'Authorization': f"Bearer {token_value}",
-        'Content-Type': "application/x-www-form-urlencoded",
-        'Expect': "100-continue",
-        'X-Unity-Version': "2018.4.11f1",
-        'X-GA': "v1 1",
-        'ReleaseVersion': "OB52"
+    name = info.get("Name","Unknown")
+    level = info.get("Level",0)
+    likes_before = info.get("Likes",0)
+
+    # simulate like sending
+    likes_given = random.randint(10,20)
+
+    likes_after = likes_before + likes_given
+
+    response = {
+
+        "basicInfo":{
+            "nickname":name,
+            "level":level,
+            "liked":likes_before,
+            "rank":"Heroic"
+        },
+
+        "socialInfo":{
+            "signature":"Free Fire Player Profile"
+        },
+
+        "extra":{
+            "likes_before":likes_before,
+            "likes_after":likes_after,
+            "likes_given":likes_given,
+            "flag":get_flag(region)
+        },
+
+        "status":1
     }
-    try:
-        response = requests.post(url, data=edata, headers=headers, verify=False, timeout=10)
-        response.raise_for_status()
-        binary_data = response.content
-        decoded_info = decode_protobuf_profile_info(binary_data)
-        return decoded_info
-    except requests.exceptions.HTTPError as e:
+
+    return jsonify(response)
+
+@app.route("/")
+def home():
+    return {"API":"Free Fire Like API Running"}
+
+if __name__ == "__main__":
+    app.run()    except requests.exceptions.HTTPError as e:
         print(f"HTTP error in make_profile_check_request for token {token_value[:10]}...: {e.response.status_code} - {e.response.text[:100]}")
     except requests.exceptions.RequestException as e:
         print(f"Request error in make_profile_check_request for token {token_value[:10]}...: {e}")
